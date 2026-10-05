@@ -1,0 +1,70 @@
+name: CI
+on:
+  - push
+  - pull_request
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux:
+    name: Linux, ${{ matrix.compiler }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CC: ${{ matrix.compiler }}
+      CXX: ${{ matrix.cxx }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc-14
+            cxx: g++-14
+          - compiler: clang-19
+            cxx: clang++-19
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - if: matrix.compiler == 'clang-19'
+        run: sudo apt-get update && sudo apt-get install -y clang-19
+      - run: make test
+      - run: make sanitize
+      - run: make fast-math
+      # The annotations need the analyzer of Clang 21 or later.
+      - if: matrix.compiler == 'clang-19'
+        run: wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s 21 && make annotations analyze ANNOTATIONS_GCC=gcc-14 ANNOTATIONS_CLANG=clang-21
+  macos:
+    name: macOS, Apple Clang
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - run: make test
+      - run: make sanitize
+      - run: make thread-sanitize
+      - run: make bounds-safety
+  windows:
+    name: Windows, Clang
+    runs-on: windows-latest
+    env:
+      CFLAGS: -O2 -Wall -Wextra -Werror -D_CRT_SECURE_NO_WARNINGS
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - run: mkdir -p build
+      # Clang with the MSVC target links the compiler-rt builtins, which 128-bit division needs, only with `-rtlib=compiler-rt`.
+      - run: clang -std=c23 $CFLAGS -rtlib=compiler-rt test/test.c -o build/test.exe && ./build/test.exe
+      - run: clang -std=c23 $CFLAGS -rtlib=compiler-rt test/soml-tagged.c -o build/soml-tagged.exe && SOML_TAGGED=build/soml-tagged.exe node --test test/conformance.js
+      - run: clang -std=c23 $CFLAGS -DSOML_IMPLEMENTATION -x c -c soml.h -o build/soml.o
+      - run: clang -std=c99 $CFLAGS -rtlib=compiler-rt test/client.c build/soml.o -o build/client-c99.exe && ./build/client-c99.exe
+      - run: clang++ -std=c++17 $CFLAGS -rtlib=compiler-rt -x c++ test/client.c -x none build/soml.o -o build/client-cpp17.exe && ./build/client-cpp17.exe

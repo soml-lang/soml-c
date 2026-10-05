@@ -1,0 +1,6 @@
+* text=auto eol=lf
+# The conformance cases include carriage returns and invalid UTF-8 on purpose.
+test/conformance/** -text linguist-vendored
+# The shared benchmark fixtures stay out of a release archive.
+test/fixtures/bench export-ignore
+test/fixtures/bench/** linguist-vendored
